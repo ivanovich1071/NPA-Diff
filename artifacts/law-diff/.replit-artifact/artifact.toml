@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Сравнение редакций НПА"
+version = "1.0.0"
+id = "artifacts/law-diff"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26075
+
+[services.development]
+run = "pnpm --filter @workspace/law-diff run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/law-diff", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/law-diff/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26075"
+BASE_PATH = "/"

@@ -3,13 +3,19 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API for comparing redactions of legal acts (NPA)
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: documents
+    description: Document upload and text extraction
+  - name: comparisons
+    description: Redaction comparisons
+  - name: chat
+    description: Contextual chat about a comparison
 paths:
   /healthz:
     get:
@@ -24,7 +30,240 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /documents/extract:
+    post:
+      operationId: extractDocument
+      tags: [documents]
+      summary: Extract text from an uploaded DOCX/PDF/TXT file (base64-encoded)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentUpload"
+      responses:
+        "200":
+          description: Extracted text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractedDocument"
+        "400":
+          description: Invalid file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /documents/fetch-url:
+    post:
+      operationId: fetchDocumentFromUrl
+      tags: [documents]
+      summary: Download and extract a document from a pravo.by URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentUrlInput"
+      responses:
+        "200":
+          description: Extracted text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractedDocument"
+        "400":
+          description: Invalid URL or unreachable document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /comparisons:
+    get:
+      operationId: listComparisons
+      tags: [comparisons]
+      summary: List comparison history
+      responses:
+        "200":
+          description: List of comparisons (summary only, no full text)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComparisonSummary"
+    post:
+      operationId: createComparison
+      tags: [comparisons]
+      summary: Create and run a new comparison between two redactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComparisonInput"
+      responses:
+        "201":
+          description: Created comparison with computed changes and summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comparison"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /comparisons/{id}:
+    get:
+      operationId: getComparison
+      tags: [comparisons]
+      summary: Get a comparison with full text and changes
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+      responses:
+        "200":
+          description: Comparison detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comparison"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateComparison
+      tags: [comparisons]
+      summary: Update review status or approval of a comparison (human-in-the-loop)
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComparisonUpdate"
+      responses:
+        "200":
+          description: Updated comparison
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comparison"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteComparison
+      tags: [comparisons]
+      summary: Delete a comparison from history
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /comparisons/{id}/report/{format}:
+    get:
+      operationId: getComparisonReport
+      tags: [comparisons]
+      summary: Generate and download a report for a comparison
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+        - name: format
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ReportFormat"
+      responses:
+        "200":
+          description: Report file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /comparisons/{id}/chat:
+    get:
+      operationId: listChatMessages
+      tags: [chat]
+      summary: List chat messages for a comparison
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+      responses:
+        "200":
+          description: Chat messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Ask a question about the comparison and get an LLM answer
+      parameters:
+        - $ref: "#/components/parameters/ComparisonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageInput"
+      responses:
+        "201":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  parameters:
+    ComparisonId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +273,232 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    DocumentUpload:
+      type: object
+      required: [filename, contentBase64]
+      properties:
+        filename:
+          type: string
+          minLength: 1
+        contentBase64:
+          type: string
+          minLength: 1
+
+    ReportFormat:
+      type: string
+      enum: [pdf, docx, html]
+
+    DocumentUrlInput:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          minLength: 1
+
+    ExtractedDocument:
+      type: object
+      required: [text, filename]
+      properties:
+        text:
+          type: string
+        filename:
+          type: string
+
+    ComparisonInput:
+      type: object
+      required:
+        [
+          title,
+          language,
+          oldDocumentName,
+          oldText,
+          newDocumentName,
+          newText,
+        ]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        language:
+          $ref: "#/components/schemas/InterfaceLanguage"
+        oldDocumentName:
+          type: string
+          minLength: 1
+        oldText:
+          type: string
+        newDocumentName:
+          type: string
+          minLength: 1
+        newText:
+          type: string
+
+    ComparisonUpdate:
+      type: object
+      properties:
+        reviewStatus:
+          $ref: "#/components/schemas/ReviewStatus"
+        reviewerNote:
+          type: ["string", "null"]
+
+    InterfaceLanguage:
+      type: string
+      enum: [ru, be]
+
+    ReviewStatus:
+      type: string
+      enum: [pending_review, approved, rejected]
+
+    ComparisonStatus:
+      type: string
+      enum: [processing, completed, failed]
+
+    ChangeType:
+      type: string
+      enum: [addition, deletion, replacement, move]
+
+    ComparisonChange:
+      type: object
+      required: [id, comparisonId, type, order, oldText, newText, articleRef]
+      properties:
+        id:
+          type: integer
+        comparisonId:
+          type: integer
+        type:
+          $ref: "#/components/schemas/ChangeType"
+        order:
+          type: integer
+        articleRef:
+          type: ["string", "null"]
+        oldText:
+          type: ["string", "null"]
+        newText:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+
+    ComparisonSummary:
+      type: object
+      required:
+        [
+          id,
+          title,
+          language,
+          oldDocumentName,
+          newDocumentName,
+          status,
+          reviewStatus,
+          changesCount,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        language:
+          $ref: "#/components/schemas/InterfaceLanguage"
+        oldDocumentName:
+          type: string
+        newDocumentName:
+          type: string
+        status:
+          $ref: "#/components/schemas/ComparisonStatus"
+        reviewStatus:
+          $ref: "#/components/schemas/ReviewStatus"
+        changesCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Comparison:
+      type: object
+      required:
+        [
+          id,
+          title,
+          language,
+          oldDocumentName,
+          oldText,
+          newDocumentName,
+          newText,
+          status,
+          reviewStatus,
+          reviewerNote,
+          summary,
+          changes,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        language:
+          $ref: "#/components/schemas/InterfaceLanguage"
+        oldDocumentName:
+          type: string
+        oldText:
+          type: string
+        newDocumentName:
+          type: string
+        newText:
+          type: string
+        status:
+          $ref: "#/components/schemas/ComparisonStatus"
+        reviewStatus:
+          $ref: "#/components/schemas/ReviewStatus"
+        reviewerNote:
+          type: ["string", "null"]
+        summary:
+          type: ["string", "null"]
+        errorMessage:
+          type: ["string", "null"]
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComparisonChange"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ChatRole:
+      type: string
+      enum: [user, assistant]
+
+    ChatMessageInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+
+    ChatMessage:
+      type: object
+      required: [id, comparisonId, role, content, createdAt]
+      properties:
+        id:
+          type: integer
+        comparisonId:
+          type: integer
+        role:
+          $ref: "#/components/schemas/ChatRole"
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
