@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import path from "node:path";
 import {
   Document,
   Packer,
@@ -7,6 +8,17 @@ import {
   HeadingLevel,
 } from "docx";
 import type { Comparison, ComparisonChangeRow } from "@workspace/db";
+
+// PDFKit's built-in fonts (Helvetica, Times, etc.) only cover Latin-1 and
+// render Cyrillic text as garbled glyphs. DejaVu Sans has full Cyrillic
+// coverage, so we embed it explicitly for all PDF report text.
+declare const __dirname: string;
+
+const FONT_REGULAR = path.resolve(__dirname, "assets/fonts/DejaVuSans.ttf");
+const FONT_BOLD = path.resolve(
+  __dirname,
+  "assets/fonts/DejaVuSans-Bold.ttf",
+);
 
 const TYPE_LABELS: Record<string, string> = {
   addition: "Добавление",
@@ -74,12 +86,17 @@ export async function renderPdfReport(
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 50 });
+    doc.registerFont("Body", FONT_REGULAR);
+    doc.registerFont("Body-Bold", FONT_BOLD);
+    doc.font("Body");
+
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    doc.fontSize(18).text(comparison.title, { underline: true });
+    doc.font("Body-Bold").fontSize(18).text(comparison.title, { underline: true });
+    doc.font("Body");
     doc.moveDown(0.5);
     doc
       .fontSize(10)
@@ -91,22 +108,24 @@ export async function renderPdfReport(
     doc.moveDown();
 
     if (comparison.summary) {
-      doc.fontSize(12).text("Резюме изменений", { underline: true });
-      doc.fontSize(10).text(comparison.summary);
+      doc.font("Body-Bold").fontSize(12).text("Резюме изменений", { underline: true });
+      doc.font("Body").fontSize(10).text(comparison.summary);
       doc.moveDown();
     }
 
-    doc.fontSize(12).text("Перечень изменений", { underline: true });
+    doc.font("Body-Bold").fontSize(12).text("Перечень изменений", { underline: true });
+    doc.font("Body");
     doc.moveDown(0.5);
 
     for (const change of changes) {
       doc
+        .font("Body-Bold")
         .fontSize(10)
         .fillColor("#8a1f1f")
         .text(
           `${TYPE_LABELS[change.type] ?? change.type}${change.articleRef ? " — " + change.articleRef : ""}`,
         );
-      doc.fillColor("#000");
+      doc.font("Body").fillColor("#000");
       if (change.oldText) doc.fontSize(9).text(`Было: ${change.oldText}`);
       if (change.newText) doc.fontSize(9).text(`Стало: ${change.newText}`);
       doc.moveDown(0.5);
