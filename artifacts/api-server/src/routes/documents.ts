@@ -20,8 +20,8 @@ const router: IRouter = Router();
 // Only these legal-portal domains (and their subdomains) may be fetched.
 const ALLOWED_HOSTS = ["pravo.by", "etalonline.by", "nalog.gov.by"];
 
-const FETCH_TIMEOUT_MS = 10_000;
-const MAX_RESPONSE_BYTES = 20 * 1024 * 1024; // 20 MB
+const FETCH_TIMEOUT_MS = 60_000;
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024; // 50 MB
 const MAX_REDIRECTS = 3;
 
 function isAllowedHost(hostname: string): boolean {
@@ -279,6 +279,13 @@ router.post("/documents/extract", async (req, res) => {
   }
 
   const buffer = Buffer.from(body.contentBase64, "base64");
+
+  if (buffer.byteLength > MAX_RESPONSE_BYTES) {
+    return res.status(413).json({
+      error: "file_too_large",
+      message: `Файл слишком большой (${(buffer.byteLength / (1024 * 1024)).toFixed(1)} МБ). Максимально допустимый размер — ${MAX_RESPONSE_BYTES / (1024 * 1024)} МБ.`,
+    });
+  }
 
   let text: string;
   try {
