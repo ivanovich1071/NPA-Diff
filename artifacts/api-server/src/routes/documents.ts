@@ -18,7 +18,7 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 // Only these legal-portal domains (and their subdomains) may be fetched.
-const ALLOWED_HOSTS = ["pravo.by", "etalonline.by"];
+const ALLOWED_HOSTS = ["pravo.by", "etalonline.by", "nalog.gov.by"];
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024; // 20 MB
@@ -306,7 +306,7 @@ router.post("/documents/fetch-url", async (req, res) => {
     return res.status(502).json({
       error: "fetch_failed",
       message:
-        "Не удалось загрузить документ по указанной ссылке. Поддерживаются только ссылки на pravo.by и etalonline.by",
+        "Не удалось загрузить документ по указанной ссылке. Поддерживаются только ссылки на pravo.by, etalonline.by и nalog.gov.by",
     });
   }
 

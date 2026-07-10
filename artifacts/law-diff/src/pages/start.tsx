@@ -306,7 +306,7 @@ export default function StartComparison() {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Поддерживаются ссылки на pravo.by и etalonline.by
+                  Поддерживаются ссылки на pravo.by, etalonline.by и nalog.gov.by
                 </p>
                 {form.watch(nameFieldName) && tabState === 'url' && !processing && (
                   <div className="mt-2 p-2 bg-success/10 text-success-foreground rounded text-sm w-full font-medium truncate">
