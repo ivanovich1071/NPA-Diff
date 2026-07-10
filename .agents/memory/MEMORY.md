@@ -1,0 +1,1 @@
+- [Sync diff O(n^2) event-loop hang](sync-diff-quadratic-hang.md) — unbounded pairwise text-similarity/move matching on request thread can peg CPU for minutes and make the whole Node server (incl. health checks) unresponsive → 502s.

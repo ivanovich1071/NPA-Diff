@@ -120,12 +120,23 @@ export function detectChanges(
 
   // Pass 1: exact-text moves (removed paragraph reappears verbatim at a
   // different diff position -- i.e. the surrounding context changed).
+  // Index added paragraphs by text so lookup is O(1) amortized instead of
+  // an O(removed x added) findIndex scan, which would itself become a
+  // quadratic hotspot on large documents even though each comparison here
+  // is cheap (plain string equality, not a word-level diff).
+  const addedByText = new Map<string, number[]>();
+  added.forEach((a, idx) => {
+    const bucket = addedByText.get(a.text);
+    if (bucket) bucket.push(idx);
+    else addedByText.set(a.text, [idx]);
+  });
+
   for (const r of removed) {
-    const matchIdx = added.findIndex(
-      (a, idx) =>
-        !usedAdded.has(idx) && a.text === r.text && a.diffIndex !== r.diffIndex,
+    const candidates = addedByText.get(r.text);
+    const matchIdx = candidates?.find(
+      (idx) => !usedAdded.has(idx) && added[idx].diffIndex !== r.diffIndex,
     );
-    if (matchIdx !== -1) {
+    if (matchIdx !== undefined) {
       usedAdded.add(matchIdx);
       changes.push({
         type: "move",
@@ -144,17 +155,43 @@ export function detectChanges(
   const usedRemaining = new Set<number>();
 
   // Pass 2: pair similar removed/added paragraphs as replacements.
+  //
+  // similarity() runs a word-level diff (diffWordsWithSpace) on every
+  // candidate pair, so naive O(removed x added) pairing is effectively
+  // O(n^2 * diff_cost). On large legal texts (e.g. a full tax code with
+  // thousands of numbered clauses) this can pin the CPU for minutes and
+  // block the Node event loop, making the whole server unresponsive
+  // (including health checks) until it finishes. Guard against that:
+  // - Skip obviously mismatched pairs cheaply (length ratio) before
+  //   paying for the expensive word-level diff.
+  // - If the candidate set is too large for pairwise comparison to be
+  //   safe, skip similarity pairing entirely and fall back to reporting
+  //   plain deletions/additions -- still correct, just without the
+  //   "replacement" grouping for extreme-sized diffs.
+  const MAX_PAIRWISE_COMPARISONS = 200_000;
+  const canPairSimilar =
+    remainingRemoved.length * remainingAdded.length <= MAX_PAIRWISE_COMPARISONS;
+  const LENGTH_RATIO_CUTOFF = 3;
+
   for (const r of remainingRemoved) {
     let bestIdx = -1;
     let bestScore = 0;
-    remainingAdded.forEach((a, idx) => {
-      if (usedRemaining.has(idx)) return;
-      const score = similarity(r.text, a.text);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = idx;
-      }
-    });
+
+    if (canPairSimilar) {
+      remainingAdded.forEach((a, idx) => {
+        if (usedRemaining.has(idx)) return;
+
+        const longer = Math.max(r.text.length, a.text.length);
+        const shorter = Math.min(r.text.length, a.text.length);
+        if (shorter === 0 || longer / shorter > LENGTH_RATIO_CUTOFF) return;
+
+        const score = similarity(r.text, a.text);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = idx;
+        }
+      });
+    }
 
     if (bestIdx !== -1 && bestScore >= 0.35) {
       usedRemaining.add(bestIdx);
