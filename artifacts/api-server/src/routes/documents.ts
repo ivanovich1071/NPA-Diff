@@ -196,8 +196,16 @@ async function fetchAllowedUrl(
     validateFetchTarget(currentUrl);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let timedOut = false;
+    // The timeout must stay armed for the entire hop — connect, headers, AND
+    // body streaming — otherwise a server that sends headers promptly but
+    // stalls mid-body (slow/stuck connection) hangs the request forever.
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FETCH_TIMEOUT_MS);
     let response: Response;
+    let buffer: Buffer;
     try {
       response = (await undiciFetch(currentUrl, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; law-diff/1.0)" },
@@ -205,25 +213,38 @@ async function fetchAllowedUrl(
         signal: controller.signal,
         dispatcher: safeAgent,
       } as never)) as unknown as Response;
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        // Drain/cancel the redirect response body so the connection is
+        // released promptly instead of lingering until GC.
+        if (response.body) {
+          await response.body.cancel().catch(() => {});
+        }
+        if (!location) {
+          throw new Error("Redirect response without a Location header");
+        }
+        currentUrl = new URL(location, currentUrl);
+        continue;
+      }
+
+      const contentLength = response.headers.get("content-length");
+      if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
+        throw new Error("Response exceeds the maximum allowed size");
+      }
+
+      buffer = await readBodyWithLimit(response, MAX_RESPONSE_BYTES);
+    } catch (err) {
+      if (timedOut) {
+        throw new Error(
+          `Request to ${currentUrl.hostname} timed out after ${FETCH_TIMEOUT_MS}ms`,
+        );
+      }
+      throw err;
     } finally {
       clearTimeout(timeout);
     }
 
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) {
-        throw new Error("Redirect response without a Location header");
-      }
-      currentUrl = new URL(location, currentUrl);
-      continue;
-    }
-
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
-      throw new Error("Response exceeds the maximum allowed size");
-    }
-
-    const buffer = await readBodyWithLimit(response, MAX_RESPONSE_BYTES);
     return { response, finalUrl: currentUrl, buffer };
   }
 
