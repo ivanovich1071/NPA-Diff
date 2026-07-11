@@ -11,6 +11,10 @@ const OPENROUTER_MODEL = "qwen/qwen-max";
 // as text length / 3.5 (Cyrillic-heavy text tokenizes denser than English)
 // and switch to OpenRouter's Qwen (1M token window) above this threshold.
 const MISTRAL_CHAR_BUDGET = 256_000 * 3.5;
+// Hard timeout for each LLM API call. Replit's edge proxy aborts connections
+// after ~130 s; keeping this well below that ensures the POST /comparisons
+// response always arrives before the proxy cuts the connection.
+const LLM_TIMEOUT_MS = 90_000;
 
 function estimateChars(turns: ChatTurn[]): number {
   return turns.reduce((sum, turn) => sum + turn.content.length, 0);
@@ -31,6 +35,7 @@ async function callMistral(turns: ChatTurn[]): Promise<string> {
       messages: turns,
       temperature: 0.2,
     }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -64,6 +69,7 @@ async function callOpenRouter(turns: ChatTurn[]): Promise<string> {
         messages: turns,
         temperature: 0.2,
       }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     },
   );
 
