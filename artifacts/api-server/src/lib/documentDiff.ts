@@ -85,13 +85,50 @@ function similarity(a: string, b: string): number {
  * moves (identical content at a different position), falling back to plain
  * additions/deletions.
  */
+// Hard cap on paragraphs fed into diffArrays. The Myers diff algorithm
+// used by diffArrays is O(n * d) where n = paragraph count and d = number
+// of differences; on very large legal documents (e.g. a 1 MB+ PDF that
+// extracts to tens of thousands of clauses) this blocks the event loop for
+// minutes. 5 000 paragraphs covers a typical full law chapter with room to
+// spare while keeping diffArrays sub-second in practice.
+const MAX_PARAGRAPHS = 5_000;
+
 export function detectChanges(
   oldText: string,
   newText: string,
 ): DetectedChange[] {
-  const oldParagraphs = splitIntoParagraphs(oldText);
-  const newParagraphs = splitIntoParagraphs(newText);
+  const allOld = splitIntoParagraphs(oldText);
+  const allNew = splitIntoParagraphs(newText);
 
+  const truncated =
+    allOld.length > MAX_PARAGRAPHS || allNew.length > MAX_PARAGRAPHS;
+  const oldParagraphs = allOld.slice(0, MAX_PARAGRAPHS);
+  const newParagraphs = allNew.slice(0, MAX_PARAGRAPHS);
+
+  if (truncated) {
+    // Surface the truncation as a synthetic change so the caller and the
+    // summary prompt can both mention it explicitly.
+    const notice: DetectedChange = {
+      type: "addition",
+      order: -1,
+      articleRef: null,
+      oldText: null,
+      newText:
+        `[Документ слишком большой для полного анализа. Показаны первые ${MAX_PARAGRAPHS} из ${Math.max(allOld.length, allNew.length)} параграфов. Оставшаяся часть не сравнивалась.]`,
+      description: "truncation_notice",
+    };
+    // Will be prepended after sorting by order; we fix the order index at the end.
+    const changes = runDiff(oldParagraphs, newParagraphs);
+    return [notice, ...changes].map((c, i) => ({ ...c, order: i }));
+  }
+
+  return runDiff(oldParagraphs, newParagraphs);
+}
+
+function runDiff(
+  oldParagraphs: string[],
+  newParagraphs: string[],
+): DetectedChange[] {
   const diff = diffArrays(oldParagraphs, newParagraphs);
 
   interface RemovedItem {
