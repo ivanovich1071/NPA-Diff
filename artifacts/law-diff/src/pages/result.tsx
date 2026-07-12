@@ -163,7 +163,8 @@ export default function ComparisonResult() {
     let current: string[] = [];
 
     const flush = () => {
-      const s = current.join("\n").trim();
+      // Must match server-side splitIntoParagraphs which joins with a space.
+      const s = current.join(" ").trim();
       if (s) blocks.push(s);
       current = [];
     };
