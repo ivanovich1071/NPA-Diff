@@ -86,12 +86,16 @@ function similarity(a: string, b: string): number {
  * additions/deletions.
  */
 // Hard cap on paragraphs fed into diffArrays. The Myers diff algorithm
-// used by diffArrays is O(n * d) where n = paragraph count and d = number
-// of differences; on very large legal documents (e.g. a 1 MB+ PDF that
-// extracts to tens of thousands of clauses) this blocks the event loop for
-// minutes. 5 000 paragraphs covers a typical full law chapter with room to
-// spare while keeping diffArrays sub-second in practice.
-const MAX_PARAGRAPHS = 5_000;
+// is O(n * d); on large PDFs extracted via pdfjs-dist each page line
+// becomes a "paragraph", so a 100-page document can produce 3 000-8 000
+// items. 1 500 keeps diffArrays sub-second while covering ~50 pages of
+// dense legal text.
+const MAX_PARAGRAPHS = 1_500;
+
+// Skip the expensive word-level similarity() call for paragraphs longer
+// than this threshold — they are typically full articles/sections unlikely
+// to share 35 %+ similarity with a counterpart of different length anyway.
+const MAX_PARA_CHARS_FOR_SIMILARITY = 800;
 
 export function detectChanges(
   oldText: string,
@@ -205,7 +209,7 @@ function runDiff(
   //   safe, skip similarity pairing entirely and fall back to reporting
   //   plain deletions/additions -- still correct, just without the
   //   "replacement" grouping for extreme-sized diffs.
-  const MAX_PAIRWISE_COMPARISONS = 200_000;
+  const MAX_PAIRWISE_COMPARISONS = 30_000;
   const canPairSimilar =
     remainingRemoved.length * remainingAdded.length <= MAX_PAIRWISE_COMPARISONS;
   const LENGTH_RATIO_CUTOFF = 3;
@@ -214,9 +218,14 @@ function runDiff(
     let bestIdx = -1;
     let bestScore = 0;
 
-    if (canPairSimilar) {
+    // Long paragraphs (full articles, sections) are expensive to diff at the
+    // word level and rarely pair as replacements — skip similarity for them.
+    const rTooLong = r.text.length > MAX_PARA_CHARS_FOR_SIMILARITY;
+
+    if (canPairSimilar && !rTooLong) {
       remainingAdded.forEach((a, idx) => {
         if (usedRemaining.has(idx)) return;
+        if (a.text.length > MAX_PARA_CHARS_FOR_SIMILARITY) return;
 
         const longer = Math.max(r.text.length, a.text.length);
         const shorter = Math.min(r.text.length, a.text.length);

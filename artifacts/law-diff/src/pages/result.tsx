@@ -151,6 +151,83 @@ export default function ComparisonResult() {
     }
   };
 
+  // Split text into paragraph-like blocks using the same heuristics as the
+  // server-side splitIntoParagraphs: blank lines separate blocks; numbered
+  // clauses and structural markers start new blocks even without blank lines.
+  const splitParagraphs = (text: string): string[] => {
+    const CLAUSE_START = /^\s*(\d+(?:\.\d+)*[.)]|[а-яa-z][)])\s/iu;
+    const ARTICLE_MARKER = /^(?:статья|артыкул|глава|раздел|пункт|падпункт)\s+/iu;
+
+    const lines = text.split("\n");
+    const blocks: string[] = [];
+    let current: string[] = [];
+
+    const flush = () => {
+      const s = current.join("\n").trim();
+      if (s) blocks.push(s);
+      current = [];
+    };
+
+    for (const line of lines) {
+      if (line.trim() === "") {
+        flush();
+      } else if (
+        current.length > 0 &&
+        (CLAUSE_START.test(line) || ARTICLE_MARKER.test(line))
+      ) {
+        flush();
+        current.push(line);
+      } else {
+        current.push(line);
+      }
+    }
+    flush();
+    return blocks;
+  };
+
+  // Render the full text of one side with changed paragraphs highlighted.
+  // Paragraphs that appear in the changes list are coloured by change type;
+  // unchanged paragraphs are rendered in muted text.
+  const renderFullTextHighlighted = (
+    fullText: string,
+    column: "old" | "new",
+  ) => {
+    // Build lookup: exact paragraph text → change type
+    const lookup = new Map<string, ChangeType>();
+    for (const change of comparison.changes) {
+      const txt = column === "old" ? change.oldText : change.newText;
+      if (txt) lookup.set(txt, change.type);
+    }
+
+    const blockColor: Record<ChangeType, string> = {
+      addition:
+        "bg-green-50 border-l-4 border-green-500 text-green-900 dark:bg-green-900/20 dark:text-green-200",
+      deletion:
+        "bg-red-50 border-l-4 border-red-500 text-red-900 line-through dark:bg-red-900/20 dark:text-red-200",
+      replacement:
+        "bg-yellow-50 border-l-4 border-yellow-500 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200",
+      move: "bg-blue-50 border-l-4 border-blue-500 text-blue-900 italic dark:bg-blue-900/20 dark:text-blue-200",
+    };
+
+    const paragraphs = splitParagraphs(fullText);
+
+    return paragraphs.map((para, i) => {
+      const type = lookup.get(para);
+      return (
+        <div
+          key={i}
+          className={`px-3 py-1.5 mb-0.5 whitespace-pre-wrap text-[14px] leading-relaxed font-serif rounded-sm ${
+            type
+              ? blockColor[type]
+              : "text-muted-foreground/80"
+          }`}
+        >
+          {para}
+        </div>
+      );
+    });
+  };
+
   // Helper to render diff content based on change type
   const renderChangeText = (change: any, column: 'old' | 'new') => {
     if (column === 'old') {
@@ -236,10 +313,8 @@ export default function ComparisonResult() {
                       ))}
                     </div>
                   ) : (
-                    <div className="font-serif text-[15px] leading-relaxed whitespace-pre-wrap p-4 bg-card rounded-lg border text-muted-foreground/80">
-                      {/* In a real app, this would be the full text with changes mapped onto it.
-                          For this implementation, we'll just show the raw text as a fallback if full-text mapping is too complex. */}
-                      {comparison.oldText}
+                    <div className="p-4 bg-card rounded-lg border">
+                      {renderFullTextHighlighted(comparison.oldText, "old")}
                     </div>
                   )}
                 </div>
@@ -276,8 +351,8 @@ export default function ComparisonResult() {
                       ))}
                     </div>
                   ) : (
-                    <div className="font-serif text-[15px] leading-relaxed whitespace-pre-wrap p-4 bg-card rounded-lg border">
-                      {comparison.newText}
+                    <div className="p-4 bg-card rounded-lg border">
+                      {renderFullTextHighlighted(comparison.newText, "new")}
                     </div>
                   )}
                 </div>
