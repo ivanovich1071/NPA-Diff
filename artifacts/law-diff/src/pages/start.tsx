@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useI18n } from "@/lib/i18n";
+import { extractPdfTextFromFile } from "@/lib/pdfExtract";
 import { 
   useCreateComparison, 
   useExtractDocument, 
@@ -83,24 +84,35 @@ export default function StartComparison() {
 
     setProcessing(true);
     try {
-      const base64 = await fileToBase64(file);
-      const res = await extractDocument.mutateAsync({
-        data: {
-          filename: file.name,
-          contentBase64: base64
-        }
-      });
+      let text: string;
+      let filename: string = file.name;
 
-      if (tokenRef.current !== myToken) return; // cancelled
+      const isPdf = file.name.toLowerCase().endsWith(".pdf");
+
+      if (isPdf) {
+        // Extract text in the browser — avoids uploading the binary to the
+        // server and eliminates server-side pdf-parse blocking on large files.
+        text = await extractPdfTextFromFile(file);
+        if (tokenRef.current !== myToken) return; // cancelled
+      } else {
+        // DOCX and TXT still go through the server extraction API.
+        const base64 = await fileToBase64(file);
+        const res = await extractDocument.mutateAsync({
+          data: { filename: file.name, contentBase64: base64 }
+        });
+        if (tokenRef.current !== myToken) return; // cancelled
+        text = res.text;
+        filename = res.filename;
+      }
 
       if (isOld) {
-        form.setValue("oldText", res.text);
-        form.setValue("oldDocumentName", res.filename);
+        form.setValue("oldText", text);
+        form.setValue("oldDocumentName", filename);
       } else {
-        form.setValue("newText", res.text);
-        form.setValue("newDocumentName", res.filename);
+        form.setValue("newText", text);
+        form.setValue("newDocumentName", filename);
       }
-      
+
       toast({ title: `Файл ${file.name} успешно загружен` });
     } catch (err) {
       if (tokenRef.current !== myToken) return; // cancelled

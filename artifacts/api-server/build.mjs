@@ -15,7 +15,12 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: [
+      path.resolve(artifactDir, "src/index.ts"),
+      // diffWorker must be a separate bundle so it can be loaded as a
+      // worker_threads Worker. It lives next to index.mjs in dist/.
+      path.resolve(artifactDir, "src/lib/diffWorker.ts"),
+    ],
     platform: "node",
     bundle: true,
     format: "esm",

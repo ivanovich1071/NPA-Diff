@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { Worker } from "node:worker_threads";
 import { eq, desc, count } from "drizzle-orm";
 import {
   db,
@@ -19,8 +20,46 @@ import {
   ListComparisonsResponse,
   GetComparisonReportParams,
 } from "@workspace/api-zod";
-import { detectChanges } from "../lib/documentDiff";
+import { type DetectedChange } from "../lib/documentDiff";
 import { callLLM } from "../lib/llmClient";
+
+// Hard timeout for the diff worker — keeps the HTTP response well within
+// Replit's 130-second proxy limit even on large documents.
+const DIFF_WORKER_TIMEOUT_MS = 90_000;
+
+/**
+ * Runs detectChanges in a dedicated worker thread so heavy sync computation
+ * cannot block the main event loop (which would also prevent healthz, LLM
+ * timeout callbacks, and other in-flight requests from being served).
+ */
+function detectChangesInWorker(
+  oldText: string,
+  newText: string,
+): Promise<DetectedChange[]> {
+  return new Promise((resolve, reject) => {
+    // esbuild mirrors the src/ tree, so src/lib/diffWorker.ts → dist/lib/diffWorker.mjs.
+    // import.meta.url is dist/index.mjs, so the relative path goes into lib/.
+    const workerUrl = new URL("./lib/diffWorker.mjs", import.meta.url);
+    const worker = new Worker(workerUrl, { workerData: { oldText, newText } });
+
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error(`Diff worker timed out after ${DIFF_WORKER_TIMEOUT_MS / 1000} seconds`));
+    }, DIFF_WORKER_TIMEOUT_MS);
+
+    worker.on("message", (msg: { ok: boolean; changes?: DetectedChange[]; error?: string }) => {
+      clearTimeout(timer);
+      worker.terminate();
+      if (msg.ok) resolve(msg.changes!);
+      else reject(new Error(msg.error ?? "Diff worker returned an error"));
+    });
+
+    worker.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 import {
   renderHtmlReport,
   renderPdfReport,
@@ -51,7 +90,7 @@ function buildSummaryPrompt(
   title: string,
   changes: { type: string; articleRef: string | null; oldText: string | null; newText: string | null }[],
 ): string {
-  const MAX_CHANGES = 200;
+  const MAX_CHANGES = 150;
   const truncated = changes.length > MAX_CHANGES;
   const lines = changes
     .slice(0, MAX_CHANGES)
@@ -134,7 +173,7 @@ router.post("/comparisons", async (req, res) => {
     .returning();
 
   try {
-    const detected = detectChanges(body.oldText, body.newText);
+    const detected = await detectChangesInWorker(body.oldText, body.newText);
 
     let insertedChanges: ComparisonChangeRow[] = [];
     if (detected.length > 0) {

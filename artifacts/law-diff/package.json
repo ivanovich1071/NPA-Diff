@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "pdfjs-dist": "^6.1.200",
     "zustand": "^5.0.14"
   }
 }

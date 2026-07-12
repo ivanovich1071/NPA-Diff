@@ -64,6 +64,11 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
   },
+  optimizeDeps: {
+    // pdfjs-dist ships its own ESM worker; pre-bundling it causes Vite to
+    // inline the worker script, breaking the GlobalWorkerOptions workerSrc URL.
+    exclude: ["pdfjs-dist"],
+  },
   server: {
     port,
     strictPort: true,
